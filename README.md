@@ -1,149 +1,141 @@
-# Destination Safety Brief (iOS + Backend)
+# BiblioHook — iOS Book PDF Summaries + Topic Feed (RAG-backed)
 
-An evidence-first iOS app that generates a **destination safety brief** using **legitimate, authoritative sources only**, where **every fact is traceable** to its origin.
+BiblioHook is an iOS-first reading companion that lets users upload book PDFs, generate grounded summaries, and explore key topics in a scrollable feed with memorable (and optionally funny) explanations — while minimizing hallucinations via Retrieval-Augmented Generation (RAG) and citations.
 
-**Product promise**
-- We do **not** tell users where to go.
-- We show **verified facts**, **recent official advisories**, and **clearly labeled user reviews** (shown as reviews, not recommendations).
-- **Every claim is linked** to a source URL and quoted evidence span.
-
----
-
-## What this app generates
-
-A structured `DestinationSafetyBrief` report:
-
-- **What is known** (facts from official sources)
-- **What is uncertain** (missing data / “not found in provided sources”)
-- **What changed recently** (deltas from prior snapshots)
-- **What people report** (reviews, explicitly labeled user-generated)
-
-No “safety score” or conclusions.
+## Why BiblioHook
+Most “book summary” apps ship curated summaries. BiblioHook focuses on **your** documents:
+- Upload a PDF (book, notes, course reader)
+- Get **full summaries** and **topic-based summaries**
+- Ask questions with **answers grounded in the PDF** (with citations)
+- Browse a “topic feed” that turns book concepts into short, engaging cards
 
 ---
 
-## Core sources (API/RSS first)
+## Core Features
 
-### Safety & health (authoritative)
-- **U.S. Department of State**: Travel Advisories + Country Information (API/RSS)
-- **CDC**: Travelers’ Health RSS + Travel Notices RSS
-- **WHO**: Disease Outbreak News (and regional RSS feeds if needed)
+### PDF → Summaries
+- Upload PDF → parse text (layout-aware where possible)
+- Generate:
+  - Full summary (short/medium/long)
+  - Topic outline (auto-detected)
+  - Topic-based summaries
 
-### Place basics / mapping
-- **GeoNames**: place metadata (CC BY attribution)
-- **OpenStreetMap**: mapping + geocoding (respect attribution + usage limits; Nominatim policies apply)
+### Ask Your Book (RAG + Citations)
+- Semantic retrieval over embedded chunks (vector search)
+- Model answers constrained to retrieved content
+- Returns citations (page/chunk references where available)
+- Refuses to answer when evidence is missing (“Not found in this book.”)
 
-### Reviews (licensed only)
-- **Google Places** reviews only under Google policies + attribution requirements  
-  Reviews are treated as **user-generated**, can be noisy, and are labeled as such.
+### Topic Feed (Scroll)
+- Converts extracted topics into feed cards:
+  - “Key idea” in 1–2 lines
+  - Example/analogy
+  - Optional “meme-style caption” **(text-only by default to avoid copyright issues)**
 
-### Scraping rule (only when allowed)
-Only scrape pages that clearly allow it (robots + terms). Rate limit heavily, cache responses, and store:
-- source URL
-- fetch timestamp
-- extracted evidence snippet(s)
+### Book Lookup (Optional add-on)
+- Search by title/author/ISBN via public APIs (Google Books / Open Library)
+- Save metadata into personal library
 
----
-
-## System architecture
-
-### A) iOS app (SwiftUI)
-- Destination search
-- Safety overview dashboard
-- Sources tab (every claim clickable → excerpt + link)
-- Updates tab (what changed since last check)
-- Save/share report as PDF
-
-### B) Backend (all fetching happens here)
-- **Fetcher service**: API/RSS + allowed scraping
-- **Normalizer**: converts to a unified schema
-- **Store**: Postgres + Redis cache
-- **LLM report service**: generation + verification
-- **Audit log**: stores source URLs, timestamps, and extracted snippets for every report
-
-### C) LLM layer (grounded, not freeform)
-1. **Retrieval**: collect relevant chunks from the store for the destination  
-2. **Generate (strict JSON)**: model outputs JSON only, with citations per statement  
-3. **Verify**: second pass checks every statement maps to evidence; otherwise drop or mark “not found”
+### Personalization
+- Reading preferences: genres, tone (simple/technical/funny), summary length
+- Per-user usage limits (free vs paid)
 
 ---
 
-## Data model
-
-We standardize early on a single schema:
-- Destination profile (description, region, language, emergency numbers)
-- Advisory summary (level, summary, last updated, link)
-- Health notices (CDC notices, vaccines, outbreaks, links)
-- Local risks (scams, transport, laws/customs — only if sourced)
-- Environment risks (weather, earthquakes, wildfire — source dependent)
-- Reviews (aggregated ratings + excerpts + platform attribution)
-- Sources (list of sources used + timestamps + evidence spans)
-
-See: [`docs/schema.md`](docs/schema.md)
+## Non-Goals (for MVP)
+- No social feed / public sharing at launch
+- No copyrighted meme images at launch (text-only captions or licensed assets only)
+- No “guaranteed page-perfect citations” for every PDF (depends on PDF structure)
 
 ---
 
-## “No hallucinations” prompting rule
+## Architecture (Industry Standard)
 
-System prompt (conceptually):
-- Use **only provided source excerpts**
-- If a fact is absent: write **"not found in provided sources"**
-- Do **not** recommend anything
-- Output **JSON only** matching the schema
-- Every field must include:
-  - `sources: [url]`
-  - `evidence: ["quoted span…"]`
+**High-level flow**
+1. iOS uploads PDF → API stores file in object storage
+2. API enqueues background ingestion job
+3. Worker pipeline:
+   - Parse PDF → structured text
+   - Chunk → embed → store vectors
+   - Generate topics + summaries + feed cards
+4. iOS polls job status and fetches outputs
+5. Chat/Q&A uses RAG retrieval + cited answers
 
-A validator rejects output missing sources for key fields.
-
----
-
-## Build plan
-
-### Phase 1 — MVP (country-level)
-- Destination search + report generation for countries
-- State Dept advisory + country info
-- CDC Travel Notices RSS
-- Report with citations + source viewer
-- Shareable PDF
-
-### Phase 2 — City-level detail
-- GeoNames metadata + maps
-- Licensed reviews (Google Places) with required attribution
-- Updates tracking (snapshots + diffs)
-
-### Phase 3 — Trust & compliance
-- Claim→evidence verification hardening
-- Rate limiting + caching
-- Terms/robots compliance log
-- Disclaimers (“not medical/legal advice”)
-
-### Phase 4 — Monetization
-- B2C subscription (saved reports, alerts)
-- B2B dashboard/API (travel agencies, universities, corporate travel, study abroad)
+**Why background jobs?**
+PDF parsing + embedding + summarization are slow/expensive and must not block API requests.
 
 ---
 
-## Repo layout
+## Tech Stack (Recommended)
 
-- `ios/` — SwiftUI app
-- `backend/` — fetch/normalize/store/report services
-- `docs/` — product brief, schema, sources, compliance
-- `scripts/` — local dev scripts
+### iOS
+- SwiftUI (premium native UI, smooth feed)
+- StoreKit 2 for subscriptions and offers
+
+Apple: StoreKit APIs are the standard way to implement auto-renewable subscriptions.  
+Source: Apple Developer docs. :contentReference[oaicite:0]{index=0}
+
+### Backend
+- FastAPI (Python) for API
+- Background workers (Celery or RQ) + Redis
+- Object storage (S3/R2/GCS) for PDFs
+
+### Database + Vector Search (RAG)
+- PostgreSQL (primary DB)
+- pgvector extension for embeddings + similarity search
+
+pgvector is an open-source Postgres extension for vector similarity search. :contentReference[oaicite:1]{index=1}
+
+### LLM API
+- OpenAI Responses API for generation (summaries, topics, feed cards, RAG answers)
+
+OpenAI positions the Responses API as the unified interface for building these workflows. :contentReference[oaicite:2]{index=2}
 
 ---
 
-## Contributing
+## Hallucination Minimization Strategy (Must-Read)
 
-PRs welcome. Please keep the product invariant:
-- **facts-only**
-- **every line traceable**
-- **reviews labeled as user-generated**
-- **no recommendations**
+BiblioHook is designed to be “grounded-first.”
+
+### Rules enforced server-side
+- The model must only use retrieved chunks as evidence for factual claims.
+- Every key claim should include at least one citation.
+- If evidence is missing → respond with “Not found in the provided document.”
+- Summaries are generated via staged summarization (chunk → section → final), not one-shot.
+
+### Output format
+Responses are returned in structured JSON:
+- `summary`
+- `key_points[] { text, citations[] }`
+- `topics[] { title, description, citations[] }`
+- `limitations[]` (missing sections, unreadable pages, etc.)
 
 ---
 
-## Disclaimer
+## Monetization (Cost-Safe)
 
-This product provides informational summaries of third-party sources.  
-It does not provide medical or legal advice.
+Because LLM usage costs money, BiblioHook uses a **hybrid** model:
+
+### Free tier (hook)
+- Limited uploads (ex: 1 active book)
+- Limited pages per upload (ex: first 20–30 pages)
+- Limited Q&A per day (ex: 5 questions/day)
+- Limited feed cards per book
+
+### Paid tier (subscription)
+- Higher limits and faster processing
+- More topic summaries and deeper Q&A
+
+### Credits (optional)
+- For power users: buy extra “processing credits” (pages or Q&A turns)
+
+### Cost Controls (non-negotiable)
+- Cache summaries/topics/feed per book + settings
+- Token budgets per request
+- Rate limiting and abuse protection
+- Usage ledger in DB: every model call increments user usage
+
+---
+
+## Repository Layout (Suggested Monorepo)
+
