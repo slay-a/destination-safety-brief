@@ -1,11 +1,15 @@
 from functools import lru_cache
+from pathlib import Path
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+# Always resolve backend/.env regardless of current working directory
+BACKEND_DIR = Path(__file__).resolve().parents[2]
+ENV_FILE = BACKEND_DIR / ".env"
+
 
 class Settings(BaseSettings):
-    # Pydantic Settings reads from environment variables and optional .env file.
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
+    model_config = SettingsConfigDict(env_file=str(ENV_FILE), env_file_encoding="utf-8")
 
     # App
     app_name: str = "BiblioHook Backend"
@@ -15,7 +19,7 @@ class Settings(BaseSettings):
     # API
     api_v1_prefix: str = "/v1"
 
-    # DB
+    # DB (required for Phase 3+)
     database_url: str
 
     # Redis / Celery
@@ -26,5 +30,4 @@ class Settings(BaseSettings):
 
 @lru_cache
 def get_settings() -> Settings:
-    # Cached so it’s created once per process.
     return Settings()
